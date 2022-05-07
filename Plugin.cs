@@ -11,7 +11,7 @@ namespace Dronecam
     [BepInPlugin(PluginInfo.PLUGIN_GUID, PluginInfo.PLUGIN_NAME, PluginInfo.PLUGIN_VERSION)]
     public class DronecamPlugin : BaseUnityPlugin
     {
-        public static GameObject hookObject;
+        public static GameObject dronecamObject;
         public static ManualLogSource logger;
 
         public static int cullingLayer = 30;
@@ -26,14 +26,14 @@ namespace Dronecam
             // Plugin startup logic
             Logger.LogInfo($"Plugin {PluginInfo.PLUGIN_GUID} is loaded!");
 
-            hookObject = new GameObject("DronecameraPlugin");
-            hookObject.AddComponent<Dronecamera>();
-            hookObject.AddComponent<Camera>();
-            hookObject.AddComponent<Light>();
-            hookObject.layer = cullingLayer;
-            DontDestroyOnLoad(hookObject);
+            dronecamObject = new GameObject("DronecameraPlugin");
+            dronecamObject.AddComponent<Dronecamera>();
+            dronecamObject.AddComponent<Camera>();
+            dronecamObject.AddComponent<Light>();
+            dronecamObject.layer = cullingLayer;
+            DontDestroyOnLoad(dronecamObject);
 
-            hookObject.GetComponent<Camera>().enabled = false;
+            dronecamObject.GetComponent<Camera>().enabled = false;
 
             EnableCam = Config.Bind("Camera", "Enable Camera", false, new ConfigDescription("Enable dronecam."));
             EnableCamlight = Config.Bind("Camlight", "Enable Camlight", false, new ConfigDescription("Enable dronecam light."));
@@ -48,60 +48,87 @@ namespace Dronecam
     {
         public static bool IsInWorld() => Singleton<GameWorld>.Instance != null;
         public static Player LocalPlayer() => Singleton<GameWorld>.Instance.RegisteredPlayers.Find(p => p.IsYourPlayer);
-        public Player ply;
+
         public Camera dronecam;
         public Light camlight;
-        public Shader shader;
 
-        public bool isEnabled;
+        public Player ply;
+        public Camera maincam;
+        public GameObject playerBlip;
+
+        public void Start()
+        {
+            dronecam = DronecamPlugin.dronecamObject.GetComponent<Camera>();
+            dronecam.cullingMask = 1 << DronecamPlugin.cullingLayer;
+
+            camlight = DronecamPlugin.dronecamObject.GetComponent<Light>();
+
+            playerBlip = GameObject.CreatePrimitive(PrimitiveType.Sphere);
+            playerBlip.layer = DronecamPlugin.cullingLayer;
+            playerBlip.GetComponent<Renderer>().material.color = Color.green;
+        }
 
         public void LateUpdate()
         {
+            if (!dronecam)
+            {
+                DronecamPlugin.logger.LogError("Dronecam was null somehow.");
+                dronecam = DronecamPlugin.dronecamObject.GetComponent<Camera>();
+            }
+
             if (IsInWorld())
             {
-                if (!dronecam)
-                {
-                    dronecam = DronecamPlugin.hookObject.GetComponent<Camera>();
-                    dronecam.depth = 50;
-                    dronecam.enabled = false;
-                    dronecam.rect = new Rect(0.0f, 0.75f, 0.25f, 0.25f);
-
-                    camlight = DronecamPlugin.hookObject.GetComponent<Light>();
-                    camlight.color = Color.white;
-                    camlight.enabled = false;
-                }
-
+                // Cache the local player.
                 ply ??= LocalPlayer();
 
-                if (DronecamPlugin.EnableCam.Value)
-                {
-                    dronecam.enabled = true;
+                // Cache the main camera (this will loop until the maincam is rendered.)
+                maincam ??= Camera.main;
 
-                    dronecam.transform.position = new Vector3(ply.Transform.position.x, ply.Transform.position.y + DronecamPlugin.CamDistance.Value, ply.Transform.position.z);
-                    dronecam.transform.LookAt(ply.Transform.position);
-                }
-                else
-                {
-                    dronecam.enabled = false;
-                }
+                // Set up the dronecamera component.
+                dronecam.depth = 50;
+                dronecam.enabled = false;
+                dronecam.rect = new Rect(0.0f, 0.75f, 0.25f, 0.25f);
 
-                if (DronecamPlugin.EnableCamlight.Value)
+                /*
+                camlight.color = Color.white;
+                camlight.enabled = false;
+                */
+
+                // Set the main camera's culling mask to ignore our gameobject.
+                if (maincam)
                 {
-                    camlight.enabled = true;
-                    camlight.intensity = DronecamPlugin.CamlightIntensity.Value;
-                }
-                else
-                {
-                    camlight.enabled = false;
+                    maincam.cullingMask = maincam.cullingMask | ~(1 << DronecamPlugin.cullingLayer);
+
+                    if (DronecamPlugin.EnableCam.Value)
+                    {
+                        dronecam.enabled = true;
+
+                        dronecam.transform.position = new Vector3(ply.Transform.position.x, ply.Transform.position.y + DronecamPlugin.CamDistance.Value, ply.Transform.position.z);
+                        dronecam.transform.LookAt(ply.Transform.position);
+
+                        playerBlip.transform.position = new Vector3(ply.Transform.position.x, ply.Transform.position.y + DronecamPlugin.CamDistance.Value - 5f, ply.Transform.position.z);
+                    }
+                    else
+                    {
+                        dronecam.enabled = false;
+                    }
+
+                    /*
+                    if (DronecamPlugin.EnableCamlight.Value)
+                    {
+                        camlight.enabled = true;
+                        camlight.intensity = DronecamPlugin.CamlightIntensity.Value;
+                    }
+                    else
+                    {
+                        camlight.enabled = false;
+                    }
+                    */
                 }
             }
             else
             {
-                if (dronecam)
-                {
-                    dronecam = null; 
-                    camlight = null;
-                }
+                dronecam.enabled = false;
             }
         }
     }
